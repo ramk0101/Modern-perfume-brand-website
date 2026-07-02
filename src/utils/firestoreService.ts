@@ -166,3 +166,131 @@ export const deleteFormulaFromFirestore = async (formulaId: string) => {
     handleFirestoreError(error, OperationType.DELETE, path);
   }
 };
+
+// 4. Owner Dashboard specific functions
+export const fetchAllOrdersFromFirestore = async () => {
+  const path = "orders";
+  try {
+    const q = query(collection(db, "orders"));
+    const querySnapshot = await getDocs(q);
+    const orders: any[] = [];
+    querySnapshot.forEach((doc) => {
+      orders.push(doc.data());
+    });
+    // Sort by date descending
+    return orders.sort((a, b) => {
+      const timeA = new Date(a.date).getTime() || 0;
+      const timeB = new Date(b.date).getTime() || 0;
+      return timeB - timeA;
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.LIST, path);
+    return [];
+  }
+};
+
+export const updateOrderStatusInFirestore = async (orderId: string, status: string) => {
+  const path = `orders/${orderId}`;
+  try {
+    const { updateDoc } = await import("firebase/firestore");
+    const orderRef = doc(db, "orders", orderId);
+    await updateDoc(orderRef, { status });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, path);
+  }
+};
+
+export const deleteOrderFromFirestore = async (orderId: string) => {
+  const path = `orders/${orderId}`;
+  try {
+    const { deleteDoc } = await import("firebase/firestore");
+    await deleteDoc(doc(db, "orders", orderId));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
+  }
+};
+
+export const fetchProductsFromFirestore = async () => {
+  const path = "products";
+  try {
+    const q = query(collection(db, "products"));
+    const querySnapshot = await getDocs(q);
+    const products: any[] = [];
+    querySnapshot.forEach((doc) => {
+      products.push(doc.data());
+    });
+    return products;
+  } catch (error) {
+    console.warn("Could not retrieve products from Firestore (using local fallback catalog):", error);
+    return [];
+  }
+};
+
+export const saveProductToFirestore = async (product: any) => {
+  const path = `products/${product.id}`;
+  try {
+    const productRef = doc(db, "products", product.id);
+    await setDoc(productRef, product);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+  }
+};
+
+export const deleteProductFromFirestore = async (productId: string) => {
+  const path = `products/${productId}`;
+  try {
+    const { deleteDoc } = await import("firebase/firestore");
+    await deleteDoc(doc(db, "products", productId));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
+  }
+};
+
+export interface StoreSettings {
+  settingId: string;
+  storeName: string;
+  storeDescription: string;
+  shippingCharges: number;
+}
+
+export const fetchStoreSettings = async (): Promise<StoreSettings | null> => {
+  const path = "settings/store";
+  try {
+    const settingsRef = doc(db, "settings", "store");
+    const settingsSnap = await getDoc(settingsRef);
+    if (settingsSnap.exists()) {
+      return settingsSnap.data() as StoreSettings;
+    }
+    return null;
+  } catch (error) {
+    console.warn("Could not retrieve store settings from Firestore (using defaults):", error);
+    return null;
+  }
+};
+
+export const saveStoreSettings = async (settings: StoreSettings) => {
+  const path = "settings/store";
+  try {
+    const settingsRef = doc(db, "settings", "store");
+    await setDoc(settingsRef, settings);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+  }
+};
+
+export const fetchAllCustomersFromFirestore = async () => {
+  const path = "users";
+  try {
+    const q = query(collection(db, "users"));
+    const querySnapshot = await getDocs(q);
+    const customers: any[] = [];
+    querySnapshot.forEach((doc) => {
+      customers.push(doc.data());
+    });
+    return customers;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.LIST, path);
+    return [];
+  }
+};
+

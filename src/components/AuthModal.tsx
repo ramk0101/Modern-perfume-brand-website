@@ -2,23 +2,18 @@ import React, { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { 
   X, 
-  Mail, 
-  Lock, 
-  User, 
   LogOut, 
-  Layers, 
   Sparkles, 
   Clock, 
   Trash2, 
-  FileSpreadsheet, 
   CheckCircle,
   AlertCircle
 } from "lucide-react";
 import { 
-  signUpWithEmail, 
-  signInWithEmail, 
   googleSignIn, 
-  googleSignOut 
+  googleSignOut,
+  signUpWithEmail,
+  signInWithEmail
 } from "../utils/firebaseAuth";
 import { 
   saveUserProfile, 
@@ -43,10 +38,6 @@ export default function AuthModal({
   onUserChanged,
   currency 
 }: AuthModalProps) {
-  const [activeTab, setActiveTab] = useState<'signin' | 'signup'>('signin');
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [displayName, setDisplayName] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
@@ -55,6 +46,10 @@ export default function AuthModal({
   const [savedFormulas, setSavedFormulas] = useState<any[]>([]);
   const [savedOrders, setSavedOrders] = useState<any[]>([]);
   const [isDataLoading, setIsDataLoading] = useState(false);
+  const [authMode, setAuthMode] = useState<'login' | 'signup'>('login');
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [displayName, setDisplayName] = useState("");
 
   useEffect(() => {
     if (currentUser) {
@@ -81,35 +76,7 @@ export default function AuthModal({
     }
   };
 
-  const handleEmailSignUp = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!email || !password || !displayName) {
-      setError("All fields are required.");
-      return;
-    }
-    if (password.length < 6) {
-      setError("Password must be at least 6 characters.");
-      return;
-    }
-    setIsLoading(true);
-    setError(null);
-    try {
-      const user = await signUpWithEmail(email, password, displayName);
-      await saveUserProfile(user);
-      onUserChanged(user, null);
-      setSuccessMsg("Welcome to the Atelier! Your account was created successfully.");
-      setTimeout(() => {
-        setSuccessMsg(null);
-      }, 3000);
-    } catch (err: any) {
-      console.error(err);
-      setError(err.message || "Failed to register.");
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleEmailSignIn = async (e: React.FormEvent) => {
+  const handleEmailAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email || !password) {
       setError("Please fill in all fields.");
@@ -118,12 +85,29 @@ export default function AuthModal({
     setIsLoading(true);
     setError(null);
     try {
-      const user = await signInWithEmail(email, password);
-      await saveUserProfile(user);
-      onUserChanged(user, null);
+      if (authMode === 'signup') {
+        if (!displayName.trim()) {
+          throw new Error("Please enter your display name.");
+        }
+        if (password.length < 6) {
+          throw new Error("Password must be at least 6 characters long.");
+        }
+        const user = await signUpWithEmail(email, password, displayName);
+        await saveUserProfile(user);
+        onUserChanged(user, null);
+        setSuccessMsg("Account registered successfully! Welcome to the Atelier.");
+      } else {
+        const user = await signInWithEmail(email, password);
+        onUserChanged(user, null);
+        setSuccessMsg("Logged in successfully! Welcome back.");
+      }
+      setTimeout(() => {
+        setSuccessMsg(null);
+      }, 3000);
+      onClose();
     } catch (err: any) {
       console.error(err);
-      setError(err.message || "Invalid credentials.");
+      setError(err.message || "Authentication failed. Please check your credentials.");
     } finally {
       setIsLoading(false);
     }
@@ -137,10 +121,14 @@ export default function AuthModal({
       if (result) {
         await saveUserProfile(result.user);
         onUserChanged(result.user, result.accessToken);
+        setSuccessMsg("Welcome back to the Atelier!");
+        setTimeout(() => {
+          setSuccessMsg(null);
+        }, 3000);
       }
     } catch (err: any) {
       console.error(err);
-      setError(err.message || "Google Authentication failed.");
+      setError(err.message || "Google Authentication failed. Please try again.");
     } finally {
       setIsLoading(false);
     }
@@ -245,7 +233,7 @@ export default function AuthModal({
                     </div>
                     <div>
                       <h3 className="text-lg font-light text-white leading-tight">
-                        Bonjour, {currentUser.displayName || "Atelier Member"}
+                        Namaste, {currentUser.displayName || "Atelier Member"}
                       </h3>
                       <p className="text-xs text-white/40 font-mono mt-0.5">{currentUser.email}</p>
                     </div>
@@ -349,25 +337,42 @@ export default function AuthModal({
                 </div>
               </div>
             ) : (
-              /* AUTH FORMS (WHEN SIGNED OUT) */
-              <div className="space-y-6">
-                {/* Form Tabs */}
-                <div className="flex border-b border-white/10 font-mono text-xs">
+              /* CLEAN ELEGANT GOOGLE-ONLY AUTH VIEW (WHEN SIGNED OUT) */
+              <div className="my-auto py-6 flex flex-col justify-center space-y-6 max-w-md mx-auto w-full">
+                <div className="space-y-2 text-center">
+                  <h3 className="text-xl font-light tracking-tight text-white">
+                    {authMode === 'login' ? 'Welcome Back to Aetheria' : 'Join the Aetheria Atelier'}
+                  </h3>
+                  <p className="text-xs text-white/50 leading-relaxed font-light">
+                    {authMode === 'login' 
+                      ? 'Access your saved custom formulas, view your complete order history, and synchronize your curated sensory records.'
+                      : 'Create a complimentary account to synthesize bespoke scents, manage unique olfactory profiles, and store extractions.'}
+                  </p>
+                </div>
+
+                {/* Aesthetic Tab Switcher */}
+                <div className="flex border border-white/10 rounded-xl overflow-hidden font-mono text-[10px] p-1 bg-black/45">
                   <button
-                    onClick={() => { setActiveTab('signin'); setError(null); }}
-                    className={`flex-1 py-2.5 font-medium border-b-2 tracking-wider transition-all uppercase ${
-                      activeTab === 'signin' ? 'border-[#fed65b] text-white' : 'border-transparent text-white/40 hover:text-white/80'
+                    type="button"
+                    onClick={() => setAuthMode('login')}
+                    className={`flex-1 py-2.5 text-center transition-all rounded-lg tracking-widest uppercase font-medium ${
+                      authMode === 'login' 
+                        ? 'bg-[#fed65b] text-black font-semibold shadow-md' 
+                        : 'text-white/40 hover:text-white/80'
                     }`}
                   >
-                    MEMBER SIGN IN
+                    Log In
                   </button>
                   <button
-                    onClick={() => { setActiveTab('signup'); setError(null); }}
-                    className={`flex-1 py-2.5 font-medium border-b-2 tracking-wider transition-all uppercase ${
-                      activeTab === 'signup' ? 'border-[#fed65b] text-white' : 'border-transparent text-white/40 hover:text-white/80'
+                    type="button"
+                    onClick={() => setAuthMode('signup')}
+                    className={`flex-1 py-2.5 text-center transition-all rounded-lg tracking-widest uppercase font-medium ${
+                      authMode === 'signup' 
+                        ? 'bg-[#fed65b] text-black font-semibold shadow-md' 
+                        : 'text-white/40 hover:text-white/80'
                     }`}
                   >
-                    CREATE ACCOUNT
+                    Sign Up
                   </button>
                 </div>
 
@@ -394,86 +399,83 @@ export default function AuthModal({
                   </motion.div>
                 )}
 
-                {/* Main Auth Form */}
-                <form onSubmit={activeTab === 'signin' ? handleEmailSignIn : handleEmailSignUp} className="space-y-4">
-                  {activeTab === 'signup' && (
+                {/* Email Credentials Form */}
+                <form onSubmit={handleEmailAuth} className="space-y-4">
+                  {authMode === 'signup' && (
                     <div className="space-y-1">
-                      <label className="block text-[10px] font-mono uppercase tracking-wider text-white/40">Full Name</label>
-                      <div className="relative">
-                        <User className="absolute left-3 top-1/2 -translate-y-1/2 text-white/30" size={14} />
-                        <input
-                          type="text"
-                          required
-                          placeholder="Jean-Baptiste Grenouille"
-                          value={displayName}
-                          onChange={(e) => setDisplayName(e.target.value)}
-                          className="w-full bg-white/5 border border-white/10 rounded-xl py-3 pl-10 pr-4 text-xs text-white placeholder-white/20 focus:outline-none focus:border-[#fed65b] focus:bg-white/[0.08] transition-all font-light"
-                        />
-                      </div>
+                      <label className="text-[10px] font-mono uppercase tracking-wider text-white/40 block">Display Name</label>
+                      <input
+                        type="text"
+                        placeholder="e.g. Jean Patou"
+                        value={displayName}
+                        onChange={(e) => setDisplayName(e.target.value)}
+                        className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-xs text-white placeholder-white/20 focus:outline-none focus:border-[#fed65b] transition-colors"
+                        required
+                      />
                     </div>
                   )}
 
                   <div className="space-y-1">
-                    <label className="block text-[10px] font-mono uppercase tracking-wider text-white/40">Email Address</label>
-                    <div className="relative">
-                      <Mail className="absolute left-3 top-1/2 -translate-y-1/2 text-white/30" size={14} />
-                      <input
-                        type="email"
-                        required
-                        placeholder="perfumer@aetheria.com"
-                        value={email}
-                        onChange={(e) => setEmail(e.target.value)}
-                        className="w-full bg-white/5 border border-white/10 rounded-xl py-3 pl-10 pr-4 text-xs text-white placeholder-white/20 focus:outline-none focus:border-[#fed65b] focus:bg-white/[0.08] transition-all font-light"
-                      />
-                    </div>
+                    <label className="text-[10px] font-mono uppercase tracking-wider text-white/40 block">Email Address</label>
+                    <input
+                      type="email"
+                      placeholder="e.g. member@aetheria.com"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-xs text-white placeholder-white/20 focus:outline-none focus:border-[#fed65b] transition-colors"
+                      required
+                    />
                   </div>
 
                   <div className="space-y-1">
-                    <label className="block text-[10px] font-mono uppercase tracking-wider text-white/40">Password</label>
-                    <div className="relative">
-                      <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-white/30" size={14} />
-                      <input
-                        type="password"
-                        required
-                        placeholder="••••••••"
-                        value={password}
-                        onChange={(e) => setPassword(e.target.value)}
-                        className="w-full bg-white/5 border border-white/10 rounded-xl py-3 pl-10 pr-4 text-xs text-white placeholder-white/20 focus:outline-none focus:border-[#fed65b] focus:bg-white/[0.08] transition-all font-light"
-                      />
-                    </div>
+                    <label className="text-[10px] font-mono uppercase tracking-wider text-white/40 block">Password</label>
+                    <input
+                      type="password"
+                      placeholder="Min. 6 characters"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-xs text-white placeholder-white/20 focus:outline-none focus:border-[#fed65b] transition-colors"
+                      required
+                    />
                   </div>
 
                   <button
                     type="submit"
                     disabled={isLoading}
-                    className="w-full bg-white hover:bg-neutral-200 text-black py-3.5 font-mono text-xs uppercase tracking-widest font-semibold transition-all duration-300 flex items-center justify-center gap-2 mt-2 disabled:opacity-50 select-none cursor-pointer"
+                    className="w-full bg-[#fed65b] hover:bg-[#fed65b]/90 text-black py-3.5 px-6 font-mono text-xs uppercase tracking-widest font-semibold transition-all duration-300 rounded-xl shadow-lg disabled:opacity-50 select-none cursor-pointer mt-2"
                   >
-                    {isLoading ? "Synchronizing..." : activeTab === 'signin' ? "Enter the Atelier" : "Forge Account"}
+                    {isLoading ? "Synchronizing..." : authMode === 'login' ? "Enter Atelier" : "Register Credentials"}
                   </button>
                 </form>
 
-                {/* Divider */}
-                <div className="relative flex py-2 items-center">
-                  <div className="flex-grow border-t border-white/5"></div>
-                  <span className="flex-shrink mx-4 text-[9px] font-mono text-white/20 uppercase tracking-widest">or continue with</span>
-                  <div className="flex-grow border-t border-white/5"></div>
+                <div className="relative py-2 flex items-center justify-center">
+                  <div className="absolute inset-0 flex items-center">
+                    <div className="w-full border-t border-white/10"></div>
+                  </div>
+                  <span className="relative px-3 bg-[#111112] text-[10px] font-mono text-white/30 uppercase tracking-widest">Or</span>
                 </div>
 
                 {/* Google SSO Button */}
-                <button
-                  type="button"
-                  onClick={handleGoogleAuth}
-                  disabled={isLoading}
-                  className="w-full border border-white/10 hover:border-white/30 hover:bg-white/5 text-white py-3 font-mono text-xs uppercase tracking-wider transition-all duration-300 flex items-center justify-center gap-3 disabled:opacity-50 select-none cursor-pointer"
-                >
-                  <svg version="1.1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" className="w-4 h-4">
-                    <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"></path>
-                    <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"></path>
-                    <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"></path>
-                    <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"></path>
-                  </svg>
-                  <span>Connect with Google</span>
-                </button>
+                <div className="space-y-3">
+                  <button
+                    type="button"
+                    onClick={handleGoogleAuth}
+                    disabled={isLoading}
+                    className="w-full bg-white/5 hover:bg-white/10 border border-white/10 text-white py-3 px-6 font-mono text-[11px] uppercase tracking-wider font-medium transition-all duration-300 flex items-center justify-center gap-3 disabled:opacity-50 select-none cursor-pointer rounded-xl"
+                  >
+                    <svg version="1.1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" className="w-4 h-4 shrink-0">
+                      <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"></path>
+                      <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"></path>
+                      <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"></path>
+                      <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"></path>
+                    </svg>
+                    <span>{isLoading ? "Connecting..." : authMode === 'login' ? "Log In with Google" : "Sign Up with Google"}</span>
+                  </button>
+
+                  <p className="text-[9px] text-white/30 text-center font-light leading-relaxed">
+                    Use Email Sign-in/Sign-up to bypass third-party Google browser restrictions. Perfect for guest testers!
+                  </p>
+                </div>
               </div>
             )}
           </div>

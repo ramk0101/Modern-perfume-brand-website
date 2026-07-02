@@ -1,4 +1,4 @@
-export type Currency = 'USD' | 'EUR' | 'GBP';
+export type Currency = 'USD' | 'INR';
 
 export interface Fragrance {
   id: string;
@@ -37,3 +37,26 @@ export interface CuratedScent {
   wearScenario: string;
   price: number;
 }
+
+export interface Order {
+  orderId: string;
+  userId: string;
+  date: string;
+  type: string;
+  productName: string;
+  size: string;
+  quantity: number;
+  pricePaid: string;
+  currency: string;
+  status: string; // 'Pending' | 'Processing' | 'Shipped' | 'Delivered' | 'Cancelled'
+  customerName: string;
+  address: string;
+}
+
+export interface Customer {
+  uid: string;
+  displayName?: string;
+  email: string;
+  createdAt?: string;
+}
+

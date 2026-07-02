@@ -50,6 +50,50 @@
         "matchScore": { "type": "string" }
       },
       "required": ["formulaId", "userId", "name"]
+    },
+    "Admin": {
+      "title": "Admin",
+      "description": "Admin user profile marker",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string" }
+      },
+      "required": ["uid"]
+    },
+    "Product": {
+      "title": "Product",
+      "description": "Fragrance product details",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "collection": { "type": "string" },
+        "image": { "type": "string" },
+        "description": { "type": "string" },
+        "price": { "type": "number" },
+        "detailedStory": { "type": "string" },
+        "topNotes": { "type": "string" },
+        "heartNotes": { "type": "string" },
+        "baseNotes": { "type": "string" },
+        "volume": { "type": "string" },
+        "isFeatured": { "type": "boolean" },
+        "isOutOfStock": { "type": "boolean" },
+        "stockCount": { "type": "number" }
+      },
+      "required": ["id", "name", "price"]
+    },
+    "StoreSetting": {
+      "title": "Store Setting",
+      "description": "Basic store configuration and shipping charges",
+      "type": "object",
+      "properties": {
+        "settingId": { "type": "string" },
+        "storeName": { "type": "string" },
+        "storeDescription": { "type": "string" },
+        "shippingCharges": { "type": "number" }
+      },
+      "required": ["settingId"]
     }
   },
   "firestore": {
@@ -64,6 +108,18 @@
     "formulas/{formulaId}": {
       "schema": "Formula",
       "description": "User custom formulations logged in Firestore"
+    },
+    "admins/{adminId}": {
+      "schema": "Admin",
+      "description": "Registered admins"
+    },
+    "products/{productId}": {
+      "schema": "Product",
+      "description": "Fragrance products dynamic catalog"
+    },
+    "settings/{settingId}": {
+      "schema": "StoreSetting",
+      "description": "Global store settings"
     }
   }
 }

@@ -1,10 +1,10 @@
 {
-  "projectId": "vast-monument-h5jvd",
-  "appId": "1:215206870769:web:b6cab8fb5fc49923313350",
-  "apiKey": "AIzaSyBasnnzmwcHU2DsD29v1qjPFUk0hMowg_4",
-  "authDomain": "vast-monument-h5jvd.firebaseapp.com",
-  "firestoreDatabaseId": "ai-studio-aetheriaparfums-51d0cceb-e9e7-4ed6-aedf-8be81c85d4a6",
-  "storageBucket": "vast-monument-h5jvd.firebasestorage.app",
-  "messagingSenderId": "215206870769",
-  "measurementId": ""
+  "projectId": "aetheria-parfums",
+  "appId": "1:764927138144:web:588f6b84acab032e9ee605",
+  "apiKey": "AIzaSyDZ8kormX-_AelU2HDdVgabrR0FTaFvtVk",
+  "authDomain": "aetheria-parfums.firebaseapp.com",
+  "firestoreDatabaseId": "(default)",
+  "storageBucket": "aetheria-parfums.firebasestorage.app",
+  "messagingSenderId": "764927138144",
+  "measurementId": "G-3S3HF6EDD4"
 }

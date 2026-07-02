@@ -2,8 +2,7 @@ import { Currency } from "../types";
 
 export const CURRENCY_CONFIG = {
   USD: { symbol: "$", rate: 1.0, label: "USD ($)" },
-  EUR: { symbol: "€", rate: 0.92, label: "EUR (€)" },
-  GBP: { symbol: "£", rate: 0.78, label: "GBP (£)" },
+  INR: { symbol: "₹", rate: 83.0, label: "INR (₹)" },
 };
 
 /**
