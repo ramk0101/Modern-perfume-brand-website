@@ -1,0 +1,6 @@
+{
+  "name": "Aetheria Parfums",
+  "description": "An immersive luxury digital fragrance house for Aetheria, with a dynamic organic fluid background, collections explorer, shopping bag experience, and an AI-powered custom fragrance curator.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
