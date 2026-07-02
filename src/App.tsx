@@ -5,7 +5,28 @@ import ShaderBackground from "./components/ShaderBackground";
 import QuickViewModal from "./components/QuickViewModal";
 import CartSidebar from "./components/CartSidebar";
 import CheckoutModal from "./components/CheckoutModal";
+import AuthModal from "./components/AuthModal";
 import { formatPrice } from "./utils/currency";
+import { 
+  auth,
+  initAuth, 
+  googleSignIn, 
+  googleSignOut,
+  getAccessToken
+} from "./utils/firebaseAuth";
+import { onAuthStateChanged } from "firebase/auth";
+import { 
+  findLedgerSpreadsheet, 
+  createLedgerSpreadsheet, 
+  appendOrders, 
+  appendFormula, 
+  fetchSheetRows 
+} from "./utils/googleSheets";
+import { 
+  saveOrderToFirestore, 
+  saveFormulaToFirestore 
+} from "./utils/firestoreService";
+import { User as FirebaseUser } from "firebase/auth";
 import { 
   ShoppingBag, 
   Search, 
@@ -20,7 +41,16 @@ import {
   Mail,
   FlameKindling,
   ChevronRight,
-  Undo
+  Undo,
+  FileSpreadsheet,
+  RefreshCw,
+  ExternalLink,
+  LogOut,
+  Lock,
+  Database,
+  Layers,
+  Table,
+  CheckCircle
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 
@@ -29,9 +59,37 @@ export default function App() {
   const [currency, setCurrency] = useState<Currency>('USD');
 
   // Navigation & Search
-  const [activeTab, setActiveTab] = useState<'collections' | 'philosophy' | 'finder'>('collections');
+  const [activeTab, setActiveTab] = useState<'collections' | 'philosophy' | 'finder' | 'ledger'>('collections');
   const [searchQuery, setSearchQuery] = useState("");
   const [isSearchVisible, setIsSearchVisible] = useState(false);
+
+  // Google Sheets & Authentication State
+  const [googleUser, setGoogleUser] = useState<FirebaseUser | null>(null);
+  const [googleToken, setGoogleToken] = useState<string | null>(null);
+  const [spreadsheetId, setSpreadsheetId] = useState<string | null>(null);
+  const [isSheetsLoading, setIsSheetsLoading] = useState(false);
+  const [sheetOrders, setSheetOrders] = useState<string[][]>([]);
+  const [sheetFormulas, setSheetFormulas] = useState<string[][]>([]);
+  const [sheetsError, setSheetsError] = useState<string | null>(null);
+  const [activeLedgerSubTab, setActiveLedgerSubTab] = useState<'orders' | 'formulas'>('orders');
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [isAuthOpen, setIsAuthOpen] = useState(false);
+
+  useEffect(() => {
+    // Listen to standard Firebase auth changes (supports both Email/Password & Google SSO sessions)
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      setGoogleUser(user);
+      const token = getAccessToken();
+      if (user && token) {
+        setGoogleToken(token);
+        await handleLoadSpreadsheet(token);
+      } else {
+        setGoogleToken(null);
+        setSpreadsheetId(null);
+      }
+    });
+    return () => unsubscribe();
+  }, []);
 
   // Collection Filter state
   const [selectedCollection, setSelectedCollection] = useState<'All' | 'Homme' | 'Femme' | 'Universal' | 'Bespoke'>('All');
@@ -197,6 +255,182 @@ export default function App() {
 
   const totalCartCount = cartItems.reduce((sum, item) => sum + item.quantity, 0);
 
+  // Google Sheets Action Handlers
+  const handleLoadSpreadsheet = async (token: string) => {
+    setIsSheetsLoading(true);
+    setSheetsError(null);
+    try {
+      const existingId = await findLedgerSpreadsheet(token);
+      if (existingId) {
+        setSpreadsheetId(existingId);
+        await fetchLedgerData(token, existingId);
+      } else {
+        setSpreadsheetId(null);
+      }
+    } catch (err) {
+      console.error(err);
+      setSheetsError("Failed to find or load spreadsheet from Google Drive.");
+    } finally {
+      setIsSheetsLoading(false);
+    }
+  };
+
+  const fetchLedgerData = async (token: string, sheetId: string) => {
+    setIsSheetsLoading(true);
+    setSheetsError(null);
+    try {
+      const orders = await fetchSheetRows(token, sheetId, 'Orders');
+      const formulas = await fetchSheetRows(token, sheetId, 'Custom%20Formulas');
+      setSheetOrders(orders);
+      setSheetFormulas(formulas);
+    } catch (err) {
+      console.error(err);
+      setSheetsError("Failed to fetch ledger rows from Google Sheets.");
+    } finally {
+      setIsSheetsLoading(false);
+    }
+  };
+
+  const handleInitializeSpreadsheet = async () => {
+    if (!googleToken) return;
+    setIsSheetsLoading(true);
+    setSheetsError(null);
+    try {
+      const newId = await createLedgerSpreadsheet(googleToken);
+      setSpreadsheetId(newId);
+      await fetchLedgerData(googleToken, newId);
+    } catch (err: any) {
+      console.error(err);
+      setSheetsError(`Failed to initialize spreadsheet: ${err.message || err}`);
+    } finally {
+      setIsSheetsLoading(false);
+    }
+  };
+
+  const handleGoogleSignIn = async () => {
+    setSheetsError(null);
+    try {
+      const result = await googleSignIn();
+      if (result) {
+        setGoogleUser(result.user);
+        setGoogleToken(result.accessToken);
+        await handleLoadSpreadsheet(result.accessToken);
+      }
+    } catch (err: any) {
+      console.error(err);
+      setSheetsError(`Authentication failed: ${err.message || err}`);
+    }
+  };
+
+  const handleGoogleSignOut = async () => {
+    try {
+      await googleSignOut();
+      setGoogleUser(null);
+      setGoogleToken(null);
+      setSpreadsheetId(null);
+      setSheetOrders([]);
+      setSheetFormulas([]);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleCheckoutSuccess = async (customerDetails: { name: string; email: string; address: string }) => {
+    try {
+      const orderRows = cartItems.map(item => {
+        const basePrice = item.fragrance.price;
+        const priceVal = item.size === "50ml" ? Math.round(basePrice * 0.7) : basePrice;
+        return {
+          orderId: "AETH-" + Math.floor(Math.random() * 900000 + 100000),
+          userId: googleUser ? googleUser.uid : "anonymous",
+          date: new Date().toLocaleDateString() + ' ' + new Date().toLocaleTimeString(),
+          type: item.fragrance.collection === 'Bespoke' ? 'Custom' : 'Standard',
+          productName: item.fragrance.name,
+          size: item.size,
+          quantity: item.quantity,
+          pricePaid: formatPrice(priceVal * item.quantity, currency),
+          currency: currency,
+          status: 'Confirmed',
+          customerName: customerDetails.name,
+          address: customerDetails.address
+        };
+      });
+
+      // 1. Save to Firestore if user is authenticated
+      if (googleUser) {
+        for (const order of orderRows) {
+          await saveOrderToFirestore(order);
+        }
+        console.log("Logged orders to Firestore.");
+      }
+
+      // 2. Save to Google Sheets if spreadsheet is active
+      if (googleToken && spreadsheetId) {
+        await appendOrders(googleToken, spreadsheetId, orderRows);
+        console.log("Logged orders to Google Sheets.");
+        await fetchLedgerData(googleToken, spreadsheetId);
+      }
+    } catch (err) {
+      console.error("Failed to log orders:", err);
+    }
+  };
+
+  const handleSyncCustomFormula = async () => {
+    if (!curatedResult) return;
+    if (!googleUser) {
+      setIsAuthOpen(true);
+      alert("Please sign in or create an account to save this custom formula to your Atelier collection.");
+      return;
+    }
+
+    const formulaId = "FORM-" + Math.floor(Math.random() * 900000 + 100000);
+    const formulaPayload = {
+      formulaId,
+      userId: googleUser.uid,
+      name: curatedResult.name,
+      date: new Date().toLocaleDateString(),
+      description: curatedResult.story,
+      vibe: curatedResult.personality,
+      intensity: "Extrait de Parfum (25%)",
+      topNotes: curatedResult.notes[0] || "",
+      heartNotes: curatedResult.notes[1] || "",
+      baseNotes: curatedResult.notes[2] || "",
+      matchScore: "98%"
+    };
+
+    try {
+      setIsSyncing(true);
+      
+      // 1. Sync to Firestore
+      await saveFormulaToFirestore(formulaPayload);
+
+      // 2. Sync to Google Sheets if connected
+      if (googleToken && spreadsheetId) {
+        const sheetsRow = {
+          name: formulaPayload.name,
+          date: formulaPayload.date,
+          description: formulaPayload.description,
+          vibe: formulaPayload.vibe,
+          intensity: formulaPayload.intensity,
+          topNotes: formulaPayload.topNotes,
+          heartNotes: formulaPayload.heartNotes,
+          baseNotes: formulaPayload.baseNotes,
+          matchScore: formulaPayload.matchScore
+        };
+        await appendFormula(googleToken, spreadsheetId, sheetsRow);
+        await fetchLedgerData(googleToken, spreadsheetId);
+        alert(`Successfully saved formulation "${curatedResult.name}" to your Atelier Profile and Google Sheets Ledger!`);
+      } else {
+        alert(`Successfully saved formulation "${curatedResult.name}" to your Atelier Profile collection!`);
+      }
+    } catch (err) {
+      console.error(err);
+      alert("Failed to save custom formulation.");
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
   return (
     <div className="bg-[#0c0c0d] text-white min-h-screen font-sans antialiased overflow-x-hidden selection:bg-[#fed65b] selection:text-black">
       {/* WebGL ambient fluid shader */}
@@ -239,6 +473,15 @@ export default function App() {
                 }`}
               >
                 The Finder
+              </a>
+              <a 
+                href="#ledger" 
+                onClick={() => setActiveTab('ledger')}
+                className={`hover:text-white transition-colors py-2 border-b-2 ${
+                  activeTab === 'ledger' ? 'border-[#fed65b] text-white' : 'border-transparent'
+                }`}
+              >
+                Sheets Ledger
               </a>
             </div>
           </div>
@@ -297,9 +540,28 @@ export default function App() {
               <ShoppingBag size={14} className="group-hover:text-[#fed65b] transition-colors" />
               <span className="font-mono">{totalCartCount}</span>
             </button>
+
+            {/* Profile / Atelier Lounge button */}
+            <button 
+              onClick={() => setIsAuthOpen(true)}
+              className={`relative flex items-center justify-center p-2 rounded-full border transition-all duration-300 ${
+                googleUser 
+                  ? 'bg-[#fed65b]/5 border-[#fed65b]/30 text-[#fed65b] hover:border-[#fed65b]' 
+                  : 'bg-white/5 border-white/10 hover:border-white/30 text-white hover:text-[#fed65b]'
+              }`}
+              title="Atelier Lounge"
+              aria-label="Open Atelier Lounge Profile"
+            >
+              <User size={14} />
+              {googleUser && (
+                <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-emerald-500 rounded-full border border-black shadow-sm animate-pulse" />
+              )}
+            </button>
           </div>
         </div>
       </nav>
+
+      <div style={{ display: activeTab === 'ledger' ? 'none' : 'block' }}>
 
       {/* Hero Section */}
       <section className="relative min-h-screen flex flex-col justify-center items-center px-6 md:px-12 pt-28 pb-20 overflow-hidden">
@@ -604,17 +866,25 @@ export default function App() {
                       </p>
                     </div>
 
-                    <div className="flex gap-4 pt-4">
+                     <div className="flex gap-4 pt-4 flex-wrap">
                       <button
                         onClick={handleOrderCustomScent}
-                        className="flex-1 bg-white hover:bg-neutral-200 text-black py-3.5 font-mono text-xs uppercase tracking-widest font-semibold transition-all flex items-center justify-center gap-2"
+                        className="flex-1 min-w-[150px] bg-white hover:bg-neutral-200 text-black py-3.5 font-mono text-xs uppercase tracking-widest font-semibold transition-all flex items-center justify-center gap-2"
                       >
                         Order Custom Flacon
                         <ArrowRight size={13} />
                       </button>
                       <button
+                        onClick={handleSyncCustomFormula}
+                        disabled={isSyncing}
+                        className="flex-1 min-w-[150px] border border-[#fed65b]/30 hover:border-[#fed65b] hover:bg-[#fed65b]/5 text-[#fed65b] py-3.5 font-mono text-xs uppercase tracking-widest font-semibold transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+                      >
+                        <FileSpreadsheet size={13} />
+                        {isSyncing ? "Syncing..." : "Sync Formula"}
+                      </button>
+                      <button
                         onClick={() => setCuratedResult(null)}
-                        className="px-4 border border-white/10 hover:border-white/30 text-white/60 hover:text-white transition-all flex items-center justify-center"
+                        className="px-4 py-3.5 border border-white/10 hover:border-white/30 text-white/60 hover:text-white transition-all flex items-center justify-center"
                         title="Start over"
                       >
                         <Undo size={14} />
@@ -770,6 +1040,294 @@ export default function App() {
           </div>
         </div>
       </footer>
+    </div>
+
+      {/* Sheets Ledger Section */}
+      {activeTab === 'ledger' && (
+        <motion.div
+          initial={{ opacity: 0, y: 15 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="pt-32 pb-24 px-6 md:px-12 max-w-7xl mx-auto min-h-screen relative z-10"
+        >
+          <div className="flex flex-col gap-8">
+            {/* Header */}
+            <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 border-b border-white/10 pb-6">
+              <div>
+                <div className="flex items-center gap-2 text-xs font-mono uppercase tracking-[0.25em] text-[#fed65b] mb-2">
+                  <FileSpreadsheet size={14} />
+                  Google Workspace Integration
+                </div>
+                <h1 className="text-3xl md:text-4xl font-light tracking-tight text-white leading-tight">
+                  The Atelier Ledger
+                </h1>
+                <p className="text-sm text-white/50 leading-relaxed font-light mt-1">
+                  Manage and review order allocations and custom formulations synced in real-time with Google Sheets.
+                </p>
+              </div>
+
+              {googleUser && (
+                <div className="flex items-center gap-3 bg-white/5 border border-white/10 p-2.5 rounded-xl font-mono text-[10px]">
+                  <div className="w-8 h-8 rounded-full bg-[#fed65b]/20 flex items-center justify-center text-[#fed65b] font-bold uppercase overflow-hidden border border-white/10">
+                    {googleUser.photoURL ? (
+                      <img src={googleUser.photoURL} alt="Profile" referrerPolicy="no-referrer" className="w-full h-full object-cover" />
+                    ) : (
+                      googleUser.displayName ? googleUser.displayName[0] : googleUser.email ? googleUser.email[0] : 'U'
+                    )}
+                  </div>
+                  <div className="flex flex-col">
+                    <span className="text-white font-medium">{googleUser.displayName || "Google User"}</span>
+                    <span className="text-white/40">{googleUser.email}</span>
+                  </div>
+                  <button
+                    onClick={handleGoogleSignOut}
+                    className="ml-4 p-1.5 hover:bg-white/10 text-white/60 hover:text-white rounded-md transition-colors"
+                    title="Sign Out"
+                  >
+                    <LogOut size={14} />
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Error messages */}
+            {sheetsError && (
+              <div className="p-4 bg-red-950/40 border border-red-900/50 rounded-xl text-xs text-red-300 font-mono flex items-start gap-2.5">
+                <div className="font-bold">Error:</div>
+                <div className="flex-1">{sheetsError}</div>
+              </div>
+            )}
+
+            {/* Auth states / Dashboard content */}
+            {!googleUser ? (
+              /* Unauthenticated view */
+              <div className="glass-card rounded-2xl border border-white/10 bg-white/[0.01] p-12 text-center max-w-xl mx-auto space-y-8 my-12 relative overflow-hidden">
+                <div className="absolute inset-0 bg-gradient-to-t from-[#fed65b]/5 via-transparent to-transparent opacity-40" />
+                
+                <div className="w-16 h-16 rounded-full bg-white/[0.02] border border-white/10 flex items-center justify-center mx-auto text-[#fed65b]">
+                  <Lock size={24} className="stroke-1" />
+                </div>
+
+                <div className="space-y-3">
+                  <h2 className="text-xl font-light text-white">Unlock Live Sheets Sync</h2>
+                  <p className="text-xs text-white/50 leading-relaxed font-light">
+                    Sign in with Google to authorize safe storage. Once connected, your standard customer orders and custom formulation recipes from the Finder will sync directly into your private Google Sheets ledger.
+                  </p>
+                </div>
+
+                {/* Standard material button style */}
+                <button 
+                  onClick={handleGoogleSignIn}
+                  className="mx-auto flex items-center justify-center gap-3 bg-white hover:bg-neutral-200 text-black font-mono text-xs uppercase tracking-wider px-8 py-4 transition-all duration-300 font-semibold cursor-pointer select-none active:scale-95 shadow-lg shadow-black/30"
+                >
+                  <svg version="1.1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" className="w-4 h-4">
+                    <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"></path>
+                    <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"></path>
+                    <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"></path>
+                    <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"></path>
+                  </svg>
+                  <span>Connect Google Sheets</span>
+                </button>
+              </div>
+            ) : (
+              /* Authenticated view */
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+                {/* Left Sidebar: Controls & Config */}
+                <div className="lg:col-span-4 space-y-6">
+                  <div className="glass-card p-6 rounded-xl border border-white/5 bg-white/[0.01]">
+                    <h3 className="text-xs font-mono uppercase tracking-wider text-white mb-4 flex items-center gap-2">
+                      <Database size={13} className="text-[#fed65b]" />
+                      Ledger Workspace
+                    </h3>
+
+                    {spreadsheetId ? (
+                      <div className="space-y-4">
+                        <div className="p-3.5 bg-green-950/20 border border-green-900/30 rounded-lg space-y-2">
+                          <span className="text-[10px] font-mono text-green-400 flex items-center gap-1.5 uppercase tracking-wider">
+                            <CheckCircle size={10} />
+                            Ledger Synchronized
+                          </span>
+                          <p className="text-[10px] font-mono text-white/50 break-all bg-black/40 p-2 rounded border border-white/5 select-all">
+                            ID: {spreadsheetId}
+                          </p>
+                        </div>
+
+                        <div className="flex flex-col gap-2 pt-2">
+                          <a
+                            href={`https://docs.google.com/spreadsheets/d/${spreadsheetId}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="w-full bg-[#fed65b] hover:bg-[#fed65b]/80 text-black py-2.5 font-mono text-xs uppercase tracking-wider transition-all flex items-center justify-center gap-2 text-center"
+                          >
+                            Open Google Sheet
+                            <ExternalLink size={12} />
+                          </a>
+                          <button
+                            onClick={() => fetchLedgerData(googleToken!, spreadsheetId)}
+                            disabled={isSheetsLoading}
+                            className="w-full border border-white/10 hover:bg-white/5 text-white py-2.5 font-mono text-xs uppercase tracking-wider transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+                          >
+                            <RefreshCw size={12} className={isSheetsLoading ? "animate-spin" : ""} />
+                            Force Refresh Data
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="space-y-4">
+                        <p className="text-xs text-white/60 leading-relaxed font-light">
+                          No "Aetheria Parfums Ledger" spreadsheet was found in your Google Drive. Click below to initialize a secure spreadsheet ledger containing "Orders" and "Custom Formulas" sheets.
+                        </p>
+                        <button
+                          onClick={handleInitializeSpreadsheet}
+                          disabled={isSheetsLoading}
+                          className="w-full bg-[#fed65b] hover:bg-[#fed65b]/80 text-black py-3 font-mono text-xs uppercase tracking-wider font-semibold transition-all flex items-center justify-center gap-2"
+                        >
+                          {isSheetsLoading ? (
+                            <>
+                              <RefreshCw size={12} className="animate-spin" />
+                              Initializing...
+                            </>
+                          ) : (
+                            <>
+                              <FileSpreadsheet size={13} />
+                              Initialize Spreadsheet
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="glass-card p-6 rounded-xl border border-white/5 bg-white/[0.01] text-xs space-y-3 font-light text-white/60 leading-relaxed">
+                    <h4 className="font-mono text-white text-[10px] uppercase tracking-wider">How Sync Works</h4>
+                    <p>
+                      <strong className="text-white/80 font-normal">Real-Time Checkout Logs:</strong> When checking out standard orders, each purchase is logged automatically to the spreadsheet.
+                    </p>
+                    <p>
+                      <strong className="text-white/80 font-normal">Custom Formulator Sync:</strong> When using the Scent Finder, click "Sync Formula" to save the AI story, top, heart, and base notes.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Right Column: Spreadsheet View tables */}
+                <div className="lg:col-span-8 space-y-6">
+                  {/* Tab selections for sheets */}
+                  <div className="flex border-b border-white/10 font-mono text-xs">
+                    <button
+                      onClick={() => setActiveLedgerSubTab('orders')}
+                      className={`px-4 py-2.5 border-b-2 font-medium transition-all flex items-center gap-2 ${
+                        activeLedgerSubTab === 'orders' ? 'border-[#fed65b] text-white' : 'border-transparent text-white/40 hover:text-white/80'
+                      }`}
+                    >
+                      <Table size={12} />
+                      Orders Tab ({sheetOrders.length})
+                    </button>
+                    <button
+                      onClick={() => setActiveLedgerSubTab('formulas')}
+                      className={`px-4 py-2.5 border-b-2 font-medium transition-all flex items-center gap-2 ${
+                        activeLedgerSubTab === 'formulas' ? 'border-[#fed65b] text-white' : 'border-transparent text-white/40 hover:text-white/80'
+                      }`}
+                    >
+                      <Layers size={12} />
+                      Custom Formulas Tab ({sheetFormulas.length})
+                    </button>
+                  </div>
+
+                  {isSheetsLoading ? (
+                    <div className="py-20 text-center text-xs font-mono text-white/40 space-y-3">
+                      <RefreshCw size={24} className="animate-spin text-[#fed65b] mx-auto" />
+                      <p>Syncing rows from your Google Sheet...</p>
+                    </div>
+                  ) : !spreadsheetId ? (
+                    <div className="py-20 text-center text-xs text-white/30 font-light italic">
+                      Please initialize your Spreadsheet Ledger on the left to review synced records.
+                    </div>
+                  ) : activeLedgerSubTab === 'orders' ? (
+                    /* Orders Sheet Table */
+                    <div className="overflow-x-auto border border-white/5 rounded-xl bg-black/25">
+                      {sheetOrders.length === 0 ? (
+                        <div className="p-12 text-center text-xs text-white/40 font-light leading-relaxed">
+                          No synced orders. Complete a checkout in the shopping bag to see it synced here in real-time.
+                        </div>
+                      ) : (
+                        <table className="w-full text-left font-mono text-[10px] text-white/70 min-w-[700px]">
+                          <thead>
+                            <tr className="bg-white/[0.02] border-b border-white/5 text-white font-medium uppercase text-[8px] tracking-wider">
+                              <th className="p-3">Order ID</th>
+                              <th className="p-3">Date</th>
+                              <th className="p-3">Type</th>
+                              <th className="p-3">Product Name</th>
+                              <th className="p-3">Size</th>
+                              <th className="p-3">Qty</th>
+                              <th className="p-3">Total</th>
+                              <th className="p-3">Status</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-white/5 font-light">
+                            {sheetOrders.map((row, idx) => (
+                              <tr key={idx} className="hover:bg-white/[0.01] transition-colors">
+                                <td className="p-3 text-[#fed65b] font-medium">{row[0]}</td>
+                                <td className="p-3 text-white/40">{row[1]}</td>
+                                <td className="p-3">
+                                  <span className={`px-1.5 py-0.5 rounded-full text-[8px] ${
+                                    row[2] === 'Custom' ? 'bg-[#fed65b]/10 text-[#fed65b]' : 'bg-white/10 text-white'
+                                  }`}>
+                                    {row[2]}
+                                  </span>
+                                </td>
+                                <td className="p-3 text-white font-normal">{row[3]}</td>
+                                <td className="p-3 text-white/40">{row[4]}</td>
+                                <td className="p-3">{row[5]}</td>
+                                <td className="p-3 text-white font-medium">{row[6]}</td>
+                                <td className="p-3 text-emerald-400">{row[8]}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      )}
+                    </div>
+                  ) : (
+                    /* Custom Formulas Sheet Table */
+                    <div className="overflow-x-auto border border-white/5 rounded-xl bg-black/25">
+                      {sheetFormulas.length === 0 ? (
+                        <div className="p-12 text-center text-xs text-white/40 font-light leading-relaxed">
+                          No exported custom formulations. Synthesize a fragrance in "The Finder" and click "Sync Formula" to save it here.
+                        </div>
+                      ) : (
+                        <table className="w-full text-left font-mono text-[10px] text-white/70 min-w-[800px]">
+                          <thead>
+                            <tr className="bg-white/[0.02] border-b border-white/5 text-white font-medium uppercase text-[8px] tracking-wider">
+                              <th className="p-3">Formula Name</th>
+                              <th className="p-3">Date Curated</th>
+                              <th className="p-3">Archetype Vibe</th>
+                              <th className="p-3">Top Notes</th>
+                              <th className="p-3">Heart Notes</th>
+                              <th className="p-3">Base Notes</th>
+                              <th className="p-3">Match Score</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-white/5 font-light">
+                            {sheetFormulas.map((row, idx) => (
+                              <tr key={idx} className="hover:bg-white/[0.01] transition-colors">
+                                <td className="p-3 text-[#fed65b] font-normal">{row[0]}</td>
+                                <td className="p-3 text-white/40">{row[1]}</td>
+                                <td className="p-3">{row[3]}</td>
+                                <td className="p-3 text-white/80">{row[5]}</td>
+                                <td className="p-3 text-white/80">{row[6]}</td>
+                                <td className="p-3 text-white/80">{row[7]}</td>
+                                <td className="p-3 text-[#fed65b] font-medium">{row[8]}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        </motion.div>
+      )}
 
       {/* Dynamic Modals / Drawer Overlays */}
       <QuickViewModal
@@ -798,6 +1356,25 @@ export default function App() {
         onClose={() => setIsCheckoutOpen(false)}
         cartItems={cartItems}
         onClearCart={handleClearCart}
+        currency={currency}
+        onCheckoutSuccess={handleCheckoutSuccess}
+      />
+
+      <AuthModal
+        isOpen={isAuthOpen}
+        onClose={() => setIsAuthOpen(false)}
+        currentUser={googleUser}
+        onUserChanged={(user, token) => {
+          setGoogleUser(user);
+          setGoogleToken(token || null);
+          if (token) {
+            handleLoadSpreadsheet(token);
+          } else if (!user) {
+            setSpreadsheetId(null);
+            setSheetOrders([]);
+            setSheetFormulas([]);
+          }
+        }}
         currency={currency}
       />
     </div>

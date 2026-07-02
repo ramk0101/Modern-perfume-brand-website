@@ -1,0 +1,88 @@
+rules_version = '2';
+service cloud_firestore {
+  match /databases/{database}/documents {
+
+    // 1. Global Safety Net - Default Deny Catch-All
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Hardened Global Helpers ---
+    function isSignedIn() {
+      return request.auth != null && request.auth.uid != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // --- Entity Specific Validation Helpers ---
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'email']) 
+        && data.keys().size() <= 5
+        && data.uid is string 
+        && data.uid == request.auth.uid
+        && data.email is string 
+        && data.email.size() <= 256;
+    }
+
+    function isValidOrder(data) {
+      return data.keys().hasAll(['orderId', 'userId', 'productName', 'pricePaid'])
+        && data.keys().size() <= 13
+        && data.orderId is string
+        && data.orderId.size() <= 64
+        && data.userId is string
+        && data.userId == request.auth.uid
+        && data.productName is string
+        && data.productName.size() <= 256
+        && data.pricePaid is string
+        && data.pricePaid.size() <= 64;
+    }
+
+    // --- Collection Routes ---
+
+    // 1. User Profiles
+    match /users/{userId} {
+      allow get: if isOwner(userId) && isValidId(userId);
+      allow create: if isOwner(userId) && isValidId(userId) && isValidUser(incoming());
+      allow update: if isOwner(userId) && isValidId(userId) && isValidUser(incoming())
+        && incoming().uid == existing().uid
+        && incoming().email == existing().email;
+      allow delete: if false; // Profiles cannot be deleted from the client
+    }
+
+    // 2. Orders Tabulation
+    match /orders/{orderId} {
+      allow get: if isSignedIn() && existing().userId == request.auth.uid && isValidId(orderId);
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && isValidId(orderId) && isValidOrder(incoming()) 
+        && incoming().userId == request.auth.uid;
+      allow update: if false; // Orders are immutable once checked out
+      allow delete: if false; // Orders cannot be deleted
+    }
+
+    // 3. Custom Formulas
+    match /formulas/{formulaId} {
+      allow get: if isSignedIn() && existing().userId == request.auth.uid && isValidId(formulaId);
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && isValidId(formulaId)
+        && incoming().userId == request.auth.uid;
+      allow update: if isSignedIn() && isValidId(formulaId)
+        && existing().userId == request.auth.uid
+        && incoming().userId == request.auth.uid;
+      allow delete: if isSignedIn() && existing().userId == request.auth.uid && isValidId(formulaId);
+    }
+  }
+}

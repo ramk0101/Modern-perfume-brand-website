@@ -10,6 +10,7 @@ interface CheckoutModalProps {
   cartItems: CartItem[];
   onClearCart: () => void;
   currency: Currency;
+  onCheckoutSuccess?: (details: { name: string; email: string; address: string }) => void;
 }
 
 export default function CheckoutModal({
@@ -18,6 +19,7 @@ export default function CheckoutModal({
   cartItems,
   onClearCart,
   currency,
+  onCheckoutSuccess,
 }: CheckoutModalProps) {
   const [step, setStep] = useState<'details' | 'success'>('details');
   const [formData, setFormData] = useState({
@@ -50,6 +52,13 @@ export default function CheckoutModal({
     if (!formData.name || !formData.email || !formData.address) {
       alert("Please enter all required shipping details.");
       return;
+    }
+    if (onCheckoutSuccess) {
+      onCheckoutSuccess({
+        name: formData.name,
+        email: formData.email,
+        address: `${formData.address}, ${formData.city} ${formData.zip}`
+      });
     }
     setStep('success');
   };
